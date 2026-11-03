@@ -152,7 +152,9 @@ export default function App() {
 
   return (
     <SafeAreaView style={gaya.layar}>
-      <StatusBar barStyle="light-content" backgroundColor={WARNA_UTAMA} />
+      {/* Android 15+ / RN baru: status bar transparan (edge-to-edge), warna latar tidak bisa diatur.
+          Ikon dibuat gelap karena latar layar putih. */}
+      <StatusBar barStyle="dark-content" />
       <ScrollView contentContainerStyle={gaya.isi}>
         <Text style={gaya.judul}>{teks.judul}</Text>
         <Text style={gaya.subjudul}>{teks.subjudul}</Text>
@@ -243,7 +245,8 @@ function Tombol({
 }
 
 const gaya = StyleSheet.create({
-  layar: { flex: 1, backgroundColor: '#FFFFFF' },
+  // Jarak atas setinggi status bar, supaya judul tidak tertutup jam/baterai HP.
+  layar: { flex: 1, backgroundColor: '#FFFFFF', paddingTop: StatusBar.currentHeight ?? 0 },
   isi: { padding: 16, paddingBottom: 48 },
   judul: { fontSize: 24, fontWeight: '700', color: WARNA_UTAMA },
   subjudul: { fontSize: 14, color: '#666', marginBottom: 16 },

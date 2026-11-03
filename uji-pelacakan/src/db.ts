@@ -155,12 +155,15 @@ export async function buatCsv(infoPerangkat: string): Promise<string> {
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const baris: string[] = [`# ${infoPerangkat}`, kolom.join(',')];
-  const semua = [
-    ...titik.map((t) => ({ ...t, tipe: 'titik', keterangan: '' })),
-    ...peristiwa.map((p) => ({ ...p, tipe: 'peristiwa' })),
-  ].sort((x, y) => Number(x.waktu_hp) - Number(y.waktu_hp));
+  // Tipe ditulis jelas: setiap baris adalah kumpulan kolom (termasuk waktu_hp) dari tabel.
+  type Baris = Record<string, number | string | null>;
+  const semua: Baris[] = [
+    ...titik.map((t): Baris => ({ ...t, tipe: 'titik', keterangan: '' })),
+    ...peristiwa.map((p): Baris => ({ ...p, tipe: 'peristiwa' })),
+  ];
+  semua.sort((x, y) => Number(x['waktu_hp']) - Number(y['waktu_hp']));
   for (const r of semua) {
-    baris.push(kolom.map((k) => aman((r as Record<string, unknown>)[k])).join(','));
+    baris.push(kolom.map((k) => aman(r[k])).join(','));
   }
   return baris.join('\n');
 }
