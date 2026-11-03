@@ -58,6 +58,7 @@ jobs:
       - name: 4. Pemeriksaan expo-doctor (bila gagal, APK tetap dibuat; kirim lognya ke Mobile Developer)
         working-directory: app-build
         continue-on-error: true
+        if: always()
         run: npx --yes expo-doctor
 
       - name: 5. Siapkan folder Android
