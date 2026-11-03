@@ -1,0 +1,13 @@
+{
+  "name": "tridhata-uji-pelacakan",
+  "version": "0.0.1",
+  "private": true,
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start",
+    "periksa": "tsc --noEmit",
+    "apk": "eas build -p android --profile uji"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

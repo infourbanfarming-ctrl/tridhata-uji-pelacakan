@@ -1,0 +1,83 @@
+# Membuat APK "Tridhata Uji Lacak" (Paket 0) di server GitHub.
+# Tidak butuh akun Expo, tidak butuh memasang apa pun di komputer.
+# Cara menjalankan: tab "Actions" -> "Buat APK Uji Lacak" -> "Run workflow".
+# Hasil: file APK di bagian "Artifacts" di bawah halaman hasil (bisa diunduh 14 hari).
+
+name: Buat APK Uji Lacak
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "uji-pelacakan/**"
+      - ".github/workflows/buat-apk-uji.yml"
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Ambil kode
+        uses: actions/checkout@v4
+
+      - name: Siapkan Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Siapkan Java 17 (untuk merakit APK Android)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: 1. Buat proyek Expo kosong lalu salin kode uji (langkah README)
+        run: |
+          npx --yes create-expo-app@latest app-build --template blank-typescript --no-install
+          rm -f app-build/App.tsx
+          cp -r uji-pelacakan/src uji-pelacakan/app.json uji-pelacakan/eas.json \
+                uji-pelacakan/index.ts uji-pelacakan/tsconfig.json app-build/
+          cd app-build
+          node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.main='index.ts';fs.writeFileSync('package.json',JSON.stringify(p,null,2))"
+          npm install
+
+      - name: 2. Pasang pustaka yang cocok dengan versi Expo
+        working-directory: app-build
+        run: |
+          npx expo install expo-location expo-task-manager expo-sqlite expo-battery \
+            expo-sharing expo-file-system expo-intent-launcher expo-device
+          echo "### Versi pustaka yang terpasang" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          npm ls --depth=0 >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 3. Pemeriksaan TypeScript (WAJIB lulus)
+        working-directory: app-build
+        run: npx tsc --noEmit
+
+      - name: 4. Pemeriksaan expo-doctor (bila gagal, APK tetap dibuat; kirim lognya ke Mobile Developer)
+        working-directory: app-build
+        continue-on-error: true
+        run: npx --yes expo-doctor
+
+      - name: 5. Siapkan folder Android
+        working-directory: app-build
+        run: npx expo prebuild --platform android --clean
+
+      - name: 6. Rakit APK (khusus HP 64-bit, seperti Samsung M21 & Infinix Hot 50)
+        working-directory: app-build/android
+        run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
+
+      - name: 7. Beri nama file APK
+        run: |
+          mkdir -p hasil
+          cp app-build/android/app/build/outputs/apk/release/app-release.apk \
+             "hasil/tridhata-uji-lacak-0.0.1-$(date +%Y%m%d-%H%M).apk"
+          ls -la hasil
+
+      - name: 8. Simpan APK untuk diunduh
+        uses: actions/upload-artifact@v4
+        with:
+          name: tridhata-uji-lacak-apk
+          path: hasil/*.apk
+          retention-days: 14
