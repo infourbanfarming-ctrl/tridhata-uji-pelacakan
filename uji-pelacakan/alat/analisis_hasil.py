@@ -84,34 +84,46 @@ def analisis(path):
     jeda_terpanjang = max((m for _, _, m in jeda), default=0)
     persen_aktif = (100 * len(aktif) / harapan) if harapan else 0
 
-    # Uji 3: restart HP
-    restart = []
-    for r in ev:
-        if r['jenis'] == 'catatan_penguji' and r['keterangan'] == 'restart' and t0 <= r['waktu_hp'] <= t1:
-            sesudah = [x for x in dalam if x['waktu_hp'] > r['waktu_hp'] + 30_000 and x['tipe'] == 'titik']
-            pulih_sendiri = None
-            pulih_dibuka = None
-            for x in dalam:
-                if x['waktu_hp'] <= r['waktu_hp']:
+    # Catatan penguji yang ditekan berulang dalam 2 menit dihitung satu kali.
+    def catatan(ket):
+        hasil = []
+        for r in ev:
+            if r['jenis'] == 'catatan_penguji' and r['keterangan'] == ket and t0 <= r['waktu_hp'] <= t1:
+                if hasil and r['waktu_hp'] - hasil[-1]['waktu_hp'] < 120_000:
                     continue
-                if x['tipe'] == 'peristiwa' and x['jenis'] == 'pelacakan_dipulihkan_saat_dibuka':
-                    pulih_dibuka = x['waktu_hp']
-                    break
-            pertama = sesudah[0]['waktu_hp'] if sesudah else None
-            if pertama and (pulih_dibuka is None or pertama < pulih_dibuka):
-                pulih_sendiri = pertama
-            restart.append({
-                'catat': r['waktu_hp'],
-                'pulih_sendiri': pulih_sendiri,
-                'pulih_saat_dibuka': pulih_dibuka,
-            })
+                hasil.append(r)
+        return hasil
 
-    # Uji 1b: swipe tutup
+    def dibuka_sesudah(ms):
+        b = [x['waktu_hp'] for x in ev if x['jenis'] == 'layar_dibuka' and x['waktu_hp'] > ms]
+        return b[0] if b else None
+
+    # Uji 3: restart HP. Sah hanya bila aplikasi TIDAK dibuka selama 10 menit sesudahnya
+    # (Panduan Penguji 4.2). Titik yang datang setelah aplikasi dibuka tidak dihitung "hidup sendiri".
+    restart = []
+    for r in catatan('restart'):
+        buka = dibuka_sesudah(r['waktu_hp'])
+        sesudah = [x for x in dalam if x['tipe'] == 'titik' and x['waktu_hp'] > r['waktu_hp'] + 30_000]
+        pertama = sesudah[0]['waktu_hp'] if sesudah else None
+        restart.append({
+            'catat': r['waktu_hp'],
+            'pulih_sendiri': pertama if pertama and (buka is None or pertama < buka) else None,
+            'pulih_saat_dibuka': buka,
+            'sah': buka is None or buka - r['waktu_hp'] >= 10 * 60_000,
+        })
+
+    # Uji 1b: swipe tutup. Titik harus datang sebelum aplikasi dibuka lagi.
     swipe = []
-    for r in ev:
-        if r['jenis'] == 'catatan_penguji' and r['keterangan'] == 'swipe' and t0 <= r['waktu_hp'] <= t1:
-            sesudah = [x for x in dalam if x['tipe'] == 'titik' and x['waktu_hp'] > r['waktu_hp']]
-            swipe.append({'catat': r['waktu_hp'], 'titik_berikut': sesudah[0]['waktu_hp'] if sesudah else None})
+    for r in catatan('swipe'):
+        buka = dibuka_sesudah(r['waktu_hp'])
+        sesudah = [x['waktu_hp'] for x in dalam if x['tipe'] == 'titik' and x['waktu_hp'] > r['waktu_hp']
+                   and (buka is None or x['waktu_hp'] < buka)]
+        swipe.append({
+            'catat': r['waktu_hp'],
+            'titik_berikut': sesudah[0] if sesudah else None,
+            'dibuka': buka,
+            'sah': buka is None or buka - r['waktu_hp'] >= 10 * 60_000,
+        })
 
     # Uji 5: baterai
     bat = [r for r in dalam if r['baterai_persen'] is not None]
@@ -154,9 +166,13 @@ def cetak(h):
     for a, b, m, j in h['celah_rute']:
         print(f"    - {jam(a)} → {jam(b)}: {m} menit, {j} m tanpa titik")
     for s in h['swipe']:
-        nxt = jam(s['titik_berikut']) if s['titik_berikut'] else 'TIDAK ADA'
-        print(f"  Swipe tutup {jam(s['catat'])} → titik berikutnya {nxt}")
-    print(f"  Hasil: {lulus(not h['celah_rute'] and all(s['titik_berikut'] for s in h['swipe']))}")
+        nxt = jam(s['titik_berikut']) if s['titik_berikut'] else 'TIDAK ADA (sebelum aplikasi dibuka lagi)'
+        catat_sah = '' if s['sah'] else f"  [BELUM SAH: aplikasi dibuka lagi {jam(s['dibuka'])}, < 10 menit]"
+        print(f"  Swipe tutup {jam(s['catat'])} → titik berikutnya {nxt}{catat_sah}")
+    if h['swipe'] and not all(s['sah'] for s in h['swipe']):
+        print('  Hasil: BELUM BISA DINILAI (swipe perlu diulang; jangan buka aplikasi 10 menit)')
+    else:
+        print(f"  Hasil: {lulus(not h['celah_rute'] and all(s['titik_berikut'] for s in h['swipe']))}")
     print()
     print('UJI 2 – Tanda aktif tiap 15 menit')
     print(f"  Masuk {h['aktif']} dari harapan {h['harapan_aktif']} ({h['persen_aktif']:.0f}%)")
@@ -170,7 +186,12 @@ def cetak(h):
     if not h['restart']:
         print('  Tidak ada catatan restart di file (tombol "Saya akan restart HP" tidak ditekan).')
     for r in h['restart']:
-        if r['pulih_sendiri']:
+        if not r['sah']:
+            m = (r['pulih_saat_dibuka'] - r['catat']) / 60000
+            print(f"  Restart {jam(r['catat'])}: BELUM SAH – aplikasi dibuka {jam(r['pulih_saat_dibuka'])} "
+                  f"({m:.1f} menit), padahal harus ditunggu 10 menit")
+            r['lulus'] = None
+        elif r['pulih_sendiri']:
             m = (r['pulih_sendiri'] - r['catat']) / 60000
             print(f"  Restart {jam(r['catat'])}: hidup SENDIRI {jam(r['pulih_sendiri'])} ({m:.0f} menit)")
             r['lulus'] = m <= BATAS_PULIH_MENIT + 2  # +2 menit untuk waktu HP menyala
@@ -182,7 +203,10 @@ def cetak(h):
             print(f"  Restart {jam(r['catat'])}: pelacakan TIDAK hidup lagi sampai uji selesai")
             r['lulus'] = False
     if h['restart']:
-        print(f"  Hasil: {lulus(all(r['lulus'] for r in h['restart']))}")
+        if any(r['lulus'] is None for r in h['restart']):
+            print('  Hasil: BELUM BISA DINILAI (restart perlu diulang)')
+        else:
+            print(f"  Hasil: {lulus(all(r['lulus'] for r in h['restart']))}")
     print()
     print('UJI 5 – Baterai')
     if h['bat_awal'] is not None:
